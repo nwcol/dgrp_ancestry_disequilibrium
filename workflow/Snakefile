@@ -16,12 +16,15 @@ def get_chrom_code(wildcards):
 # End-product output files
 
 CHROMS = ["2L", "2R", "3L", "3R", "X"]
+SAMPLES = []
+with open("../results/DGRP_samples.txt", "r") as fin:
+    for line in fin:
+        SAMPLES.append(line.strip())
 
 rule all:
     input:
-        expand("../results/vcfs/merged_DGRP_ZI_FR_{chrom}.vcf.gz",
-               chrom=CHROMS),
-        "../results/VCF_to_AHMM.samples"
+        expand("../results/AHMM_outputs/{sample}",
+               chrom=CHROMS, sample=SAMPLES),
 
 
 # Create some input data
