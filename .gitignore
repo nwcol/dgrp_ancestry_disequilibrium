@@ -1,2 +1,9 @@
+workflow/.snakemake/
 .ipynb_checkpoints/
-data/*.gz
+data/vcfs/
+results/vcfs/
+tests/
+
+workflow/attempt
+workflow/temp.vcf
+workflow/x.txt

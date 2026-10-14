@@ -1,0 +1,229 @@
+
+import pandas
+import numpy as np
+
+
+# Helper functions
+
+def get_chrom_code(wildcards):
+    """Map a chromosome label to the corresponding numeric code, 'X' -> 4"""
+    df = pandas.read_csv(
+        "../data/chr_map.txt", sep="\\s+", names=["label", "code"])
+    mapping = {label: code for label, code in zip(df["label"], df["code"])}
+    return mapping[wildcards.chrom]
+
+
+# End-product output files
+
+CHROMS = ["2L", "2R", "3L", "3R", "X"]
+
+rule all:
+    input:
+        expand("../results/vcfs/merged_DGRP_ZI_FR_{chrom}.vcf.gz",
+               chrom=CHROMS),
+        "../results/VCF_to_AHMM.samples"
+
+
+# Create some input data
+
+rule index_input_vcfs:
+    # Index input VCF files
+    input:
+        "../data/vcfs/{dataset}.vcf.gz"
+    output:
+        "../data/vcfs/{dataset}.vcf.gz.csi"
+    shell:
+        """
+        bcftools index {input}
+        """
+
+rule format_rec_map:
+    # Make some alterations to the input recombination map
+    input:
+        script="scripts/format_rec_map.py",
+        rec_map="../data/recomb_r6_num.tsv",
+        labels="../data/chr_map.txt"
+    output:
+        "../results/rec_map_build6.tsv"
+    shell:
+        """
+        python {input.script} -i {input.rec_map} -l {input.labels} -o {output}
+        """
+
+
+# Extract sample labels from VCFs
+
+rule extract_dgrp_sample_names:
+    input:
+        "../data/vcfs/DGRP-3_final_biallelic-new.vcf.gz"
+    output:
+        "../results/DGRP_samples.txt"
+    shell:
+        """
+        bcftools query -l {input} > {output}
+        """
+
+rule extract_panel_sample_names:
+    # Extract sample names from the ZI, ET, FR panel and subset to ZI, FR
+    input:
+        "../data/vcfs/ZI_ET_FR_combined_all_num_biallelic.vcf.gz"
+    output:
+        "../results/ZI_FR_samples.txt"
+    shell:
+        """
+        bcftools query -l {input} | grep 'ZI\|FR' > {output}
+        """
+
+rule make_ahmm_to_vcf_sample_file:
+    # Create a file with this format:
+    #   sample_ZI_0 0
+    #   sample_ZI_1 0
+    #   sample_FR_0 1
+    #   sample_FR_1 1
+    #   sample_DGRP admixed
+    input:
+        dgrp="../results/DGRP_samples.txt",
+        panel="../results/ZI_FR_samples.txt"
+    output:
+        "../results/VCF_to_AHMM.samples"
+    shell:
+        """
+        grep ZI {input.panel} | awk '{{print $0 "\t0"}}' > {output}
+        grep FR {input.panel} | awk '{{print $0 "\t1"}}' >> {output}
+        awk '{{print $0 "\tadmixed"}}' {input.dgrp} >> {output}
+        """
+
+rule make_ahmm_sample_file:
+    # Add a column with ploidy (`2`) to the DGRP sample list.
+    input:
+        "../results/DGRP_samples.txt"
+    output:
+        "../results/DGRP_AHMM.samples"
+    shell:
+        """
+        awk '{{print $0 "\t2"}}' {input} > {output}
+        """
+
+
+# Simplify VCFs and split them by chromosome
+
+rule split_raw_dgrp_vcf:
+    # Simplify the DGRP-3 VCF and split it by chromosome.
+    # Bcftools options:
+    #   -v snps: Include only SNPs (raw file includes indels)
+    input:
+        "../data/vcfs/DGRP-3_final_biallelic-new.vcf.gz",
+        index="../data/vcfs/DGRP-3_final_biallelic-new.vcf.gz.csi"
+    output:
+        "../results/vcfs/DGRP_{chrom}.vcf.gz"
+    shell:
+        """
+        bcftools view -r {wildcards.chrom} -v snps {input} | \
+            bcftools annotate -x INFO,^FORMAT/GT,FORMAT/AD,FORMAT/GQ -W -o {output}
+        """
+
+rule split_raw_panel_vcf:
+    # Subset, split by chromosome, and simplify the ZI, ET, FR panel VCF.
+    # Map chromosome labels from numeric codes to strings, e.g. 7 -> 2R.
+    input:
+        vcf="../data/vcfs/ZI_ET_FR_combined_all_num_biallelic.vcf.gz",
+        index="../data/vcfs/ZI_ET_FR_combined_all_num_biallelic.vcf.gz.csi",
+        chrom_map="../data/inverse_chr_map.txt",
+        samples="../results/ZI_FR_samples.txt"
+    output:
+        "../results/vcfs/ZI_FR_{chrom}.vcf.gz"
+    params:
+        chrom_code = get_chrom_code
+    shell:
+        """
+        bcftools view -S {input.samples} -r {params.chrom_code} {input.vcf} | \
+            bcftools annotate --rename-chrs {input.chrom_map} \
+            -x INFO,^FORMAT/GT,FORMAT/AD,FORMAT/GQ -W -o {output}
+        """
+
+
+# Merge VCFs
+
+rule merge_vcfs:
+    # Merge DGRP and panel VCFs and drop sites that aren't biallelic SNPs
+    # Bcftools flags:
+    #   -m2 -M2: Keeps only biallelic sites
+    #   -g ^miss: Keep only lines with no missing genotypes
+    #   -W: Create an index file for the output VCF
+    input:
+        dgrp="../results/vcfs/DGRP_{chrom}.vcf.gz",
+        zi_fr="../results/vcfs/ZI_FR_{chrom}.vcf.gz"
+    output:
+        "../results/vcfs/merged_DGRP_ZI_FR_{chrom}.vcf.gz"
+    shell:
+        """
+        bcftools merge {input.dgrp} {input.zi_fr} | \
+            bcftools view -m2 -M2 -g ^miss -W -o {output}
+        """
+
+
+# Create AncestryHMM input files
+
+rule make_ahmm_inputs:
+    # 
+    input:
+        script="scripts/vcf_to_ahmm.py",
+        vcf="../results/vcfs/merged_DGRP_ZI_FR_{chrom}.vcf.gz",
+        samples="../results/VCF_to_AHMM.samples",
+        rec="../data/recomb_build6.tsv"
+    output:
+        table="../results/AHMM_inputs/AHMM_input_{chrom}.tsv",
+        samples="../results/AHMM_inputs/AHMM_input_{chrom}.samples"
+    shell:
+        """
+        python {input.script} \
+            --vcf {input.vcf} \
+            --samples {input.samples} \
+            --rec {input.rec} \
+            -g 1 \
+            -o {output.samples} \
+            > {output.table}
+        """
+
+rule split_ahmm_inputs:
+    # Split AHMM input files so that each DGRP sample has its own file
+    # (to reduce the speed of AHMM runs and allow parallelization)
+    input:
+        table="../results/AHMM_inputs/AHMM_input_{chrom}.tsv",
+        samples="../results/AHMM_inputs/AHMM_input_{chrom}.samples"
+    output:
+        table="",
+        samples="",
+    shell:
+        """
+        """
+
+
+# Run AncestryHMM
+
+rule run_ahmm:
+    # AncestrHMM arguments
+    #   -a 2 0.2 0.8: Specify two ancestral populations (ZI and FR), with
+    #                 prior ancestry probabilities 20%, 80%
+    #   etc
+    input:
+        table="",
+        samples=""
+    output:
+        "AHMM_outputs/"
+    shell:
+        """
+        ancestry_hmm -i {input.table} \
+            -s {input.samples} \
+            -a 2 0.2 0.8 \
+            -p 0 0.2 1598 \
+            -p 1 0.8 1598 \
+            -ne 25000000 \
+            -g \
+            > {output}
+        """
+
+
+
+
+
