@@ -21,10 +21,12 @@ with open("../results/DGRP_samples.txt", "r") as fin:
     for line in fin:
         SAMPLES.append(line.strip())
 
+
 rule all:
     input:
-        expand("../results/AHMM_outputs/{sample}",
-               chrom=CHROMS, sample=SAMPLES),
+        expand("../results/AHMM_outputs/{sample}.posterior", sample=SAMPLES),
+        "../results/ancestry/DGRP-2_subset_ancestry.tsv",
+        "../results/ancestry/DGRP-3_ancestry.tsv",
 
 
 # Create some input data
@@ -71,18 +73,18 @@ rule extract_panel_sample_names:
     input:
         "../data/vcfs/ZI_ET_FR_combined_all_num_biallelic.vcf.gz"
     output:
-        "../results/ZI_FR_samples.txt"
+        "../results/FR_ZI_samples.txt"
     shell:
         """
-        bcftools query -l {input} | grep 'ZI\|FR' > {output}
+        bcftools query -l {input} | grep 'FR\|ZI' > {output}
         """
 
 rule make_ahmm_to_vcf_sample_file:
     # Create a file with this format:
-    #   sample_ZI_0 0
-    #   sample_ZI_1 0
-    #   sample_FR_0 1
-    #   sample_FR_1 1
+    #   sample_FR_0 0
+    #   sample_FR_1 0
+    #   sample_ZI_0 1
+    #   sample_ZI_1 1
     #   sample_DGRP admixed
     input:
         dgrp="../results/DGRP_samples.txt",
@@ -91,8 +93,8 @@ rule make_ahmm_to_vcf_sample_file:
         "../results/VCF_to_AHMM.samples"
     shell:
         """
-        grep ZI {input.panel} | awk '{{print $0 "\t0"}}' > {output}
-        grep FR {input.panel} | awk '{{print $0 "\t1"}}' >> {output}
+        grep FR {input.panel} | awk '{{print $0 "\t0"}}' > {output}
+        grep ZI {input.panel} | awk '{{print $0 "\t1"}}' >> {output}
         awk '{{print $0 "\tadmixed"}}' {input.dgrp} >> {output}
         """
 
@@ -132,9 +134,9 @@ rule split_raw_panel_vcf:
         vcf="../data/vcfs/ZI_ET_FR_combined_all_num_biallelic.vcf.gz",
         index="../data/vcfs/ZI_ET_FR_combined_all_num_biallelic.vcf.gz.csi",
         chrom_map="../data/inverse_chr_map.txt",
-        samples="../results/ZI_FR_samples.txt"
+        samples="../results/FR_ZI_samples.txt"
     output:
-        "../results/vcfs/ZI_FR_{chrom}.vcf.gz"
+        "../results/vcfs/FR_ZI_{chrom}.vcf.gz"
     params:
         chrom_code = get_chrom_code
     shell:
@@ -142,6 +144,37 @@ rule split_raw_panel_vcf:
         bcftools view -S {input.samples} -r {params.chrom_code} {input.vcf} | \
             bcftools annotate --rename-chrs {input.chrom_map} \
             -x INFO,^FORMAT/GT,FORMAT/AD,FORMAT/GQ -W -o {output}
+        """
+
+
+# Extract information about VCF contents
+
+rule extract_ref_alt:
+    # Extract position, reference/alternate allele, and alternate allele
+    # count from chromosome and dataset (DGRP, FR/ZI)-specific VCFs.
+    input:
+        "../results/vcfs/{label}_{chrom}.vcf.gz"
+    output:
+        "../results/vcf_info/ref_alt_{label}_{chrom}.tsv"
+    shell:
+        """
+        bcftools +fill-tags {input} | \
+            bcftools query -f'%CHROM\t%POS\t%REF\t%ALT\t%AC\n' > {output}
+        """
+
+rule merge_ref_alt:
+    input:
+        script="scripts/merge_ref_alt_tables.py",
+        fr_zi="../results/vcf_info/FR_ZI_{chrom}.tsv",
+        dgrp="../results/vcf_info/DGRP_{chrom}.tsv"
+    output:
+        "../results/vcf_info/ref_alt_FR_ZI_DGRP.tsv"
+    shell:
+        """
+        python {input.script} \
+            -i {input.fr_zi} {input.dgrp} \
+            --labels panel dgrp \
+            -o {output}
         """
 
 
@@ -155,12 +188,12 @@ rule merge_vcfs:
     #   -W: Create an index file for the output VCF
     input:
         dgrp="../results/vcfs/DGRP_{chrom}.vcf.gz",
-        zi_fr="../results/vcfs/ZI_FR_{chrom}.vcf.gz"
+        fr_zi="../results/vcfs/FR_ZI_{chrom}.vcf.gz"
     output:
-        "../results/vcfs/merged_DGRP_ZI_FR_{chrom}.vcf.gz"
+        "../results/vcfs/merged_FR_ZI_DGRP_{chrom}.vcf.gz"
     shell:
         """
-        bcftools merge {input.dgrp} {input.zi_fr} | \
+        bcftools merge {input.fr_zi} {input.dgrp} | \
             bcftools view -m2 -M2 -g ^miss -W -o {output}
         """
 
@@ -171,12 +204,12 @@ rule make_ahmm_inputs:
     # 
     input:
         script="scripts/vcf_to_ahmm.py",
-        vcf="../results/vcfs/merged_DGRP_ZI_FR_{chrom}.vcf.gz",
+        vcf="../results/vcfs/merged_FR_ZI_DGRP_{chrom}.vcf.gz",
         samples="../results/VCF_to_AHMM.samples",
         rec="../data/recomb_build6.tsv"
     output:
-        table="../results/AHMM_inputs/AHMM_input_{chrom}.tsv",
-        samples="../results/AHMM_inputs/AHMM_input_{chrom}.samples"
+        table="../results/AHMM_inputs/FR_ZI_DGRP_{chrom}.tsv",
+        samples="../results/AHMM_inputs/FR_ZI_DGRP_{chrom}.samples"
     shell:
         """
         python {input.script} \
@@ -188,42 +221,114 @@ rule make_ahmm_inputs:
             > {output.table}
         """
 
+rule copy_sample_file:
+    input:
+        "../results/AHMM_inputs/FR_ZI_DGRP_2L.samples"
+    output:
+        "../results/AHMM_inputs/FR_ZI_DGRP.samples"
+    shell:
+        """
+        cp {input} {output}
+        """
+
+rule concatenate_ahmm_inputs:
+    # Concatenate all chromosome-specific Ancestry HMM input tables into a
+    # single file.
+    input:
+        expand("../results/AHMM_inputs/FR_ZI_DGRP_{chrom}.tsv",
+               chrom=CHROMS)
+    output:
+        "../results/AHMM_inputs/FR_ZI_DGRP.tsv"
+    shell:
+        """
+        cat {input} > {output}
+        """
+
 rule split_ahmm_inputs:
     # Split AHMM input files so that each DGRP sample has its own file
     # (to reduce the speed of AHMM runs and allow parallelization)
     input:
-        table="../results/AHMM_inputs/AHMM_input_{chrom}.tsv",
-        samples="../results/AHMM_inputs/AHMM_input_{chrom}.samples"
+        script="scripts/split_ahmm_samples.py",
+        table="../results/AHMM_inputs/FR_ZI_DGRP.tsv",
+        samples="../results/VCF_to_AHMM.samples"
     output:
-        table="",
-        samples="",
+        tables=expand("../results/AHMM_inputs/FR_ZI_{sample}.tsv",
+                      sample=SAMPLES),
+        samples=expand("../results/AHMM_inputs/FR_ZI_{sample}.samples",
+                       sample=SAMPLES)
+    params:
+        prefix="../results/AHMM_inputs/FR_ZI"
     shell:
         """
+        python {input.script} \
+            -i {input.table} \
+            -s {input.samples} \
+            -o {params.prefix}
         """
 
 
 # Run AncestryHMM
 
-rule run_ahmm:
-    # AncestrHMM arguments
-    #   -a 2 0.2 0.8: Specify two ancestral populations (ZI and FR), with
-    #                 prior ancestry probabilities 20%, 80%
+rule run_ancestry_hmm:
+    # Run Ancestry HMM on sample-specific input files.
+    # Ancestry HMM arguments:
+    #   -a 2 0.8 0.2: Specify two ancestral populations (FR and ZI), with
+    #                 prior ancestry probabilities 80%, 20%
     #   etc
     input:
-        table="",
-        samples=""
+        table="../results/AHMM_inputs/FR_ZI_{sample}.tsv",
+        samples="../results/AHMM_inputs/FR_ZI_{sample}.samples"
     output:
-        "AHMM_outputs/"
+        "../results/AHMM_outputs/{sample}.posterior"
+    params:
+        out="{sample}.posterior",
+        dir="../results/AHMM_outputs/"
     shell:
         """
         ancestry_hmm -i {input.table} \
             -s {input.samples} \
-            -a 2 0.2 0.8 \
-            -p 0 0.2 1598 \
-            -p 1 0.8 1598 \
-            -ne 25000000 \
-            -g \
-            > {output}
+            -a 2 0.8 0.2 \
+            -p 0 0.8 1598 \
+            -p 1 0.2 1598 \
+            -ne 2500000 \
+            -g
+        mv {params.out} {params.dir}
+        """
+
+
+# Build tables with maximum a posterior ancestries for each sample
+
+rule build_subset_ancestry_table:
+     # Build an ancestry table with DGRP phase 2 (DGRP-2) samples only
+    input:
+        script="scripts/build_ancestry_table.py",
+        tables=expand("../results/AHMM_outputs/{sample}.posterior",
+                      sample=SAMPLES[:205]),
+        samples="../results/VCF_to_AHMM.samples"
+    output:
+        "../results/ancestry/DGRP-2_subset_ancestry.tsv"
+    shell:
+        """
+        python {input.script} \
+            -i {input.tables} \
+            -s {input.samples} \
+            -o {output}
+        """
+
+rule buld_ancestry_table:
+    input:
+        script="scripts/build_ancestry_table.py",
+        tables=expand("../results/AHMM_outputs/{sample}.posterior",
+                      sample=SAMPLES),
+        samples="../results/VCF_to_AHMM.samples"
+    output:
+        "../results/ancestry/DGRP-3_ancestry.tsv"
+    shell:
+        """
+        python {input.script} \
+            -i {input.tables} \
+            -s {input.samples} \
+            -o {output}
         """
 
 

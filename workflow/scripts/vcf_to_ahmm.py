@@ -7,6 +7,7 @@ Changes from original
 - Added support for gzipped VCF files
 - Added support for recombination maps
 - Added long forms for argument names
+- Allow reading phased genotypes
 
 Recombination map format
 ------------------------
@@ -34,23 +35,34 @@ def get_args():
                         help="sample to population file", required=True)
     parser.add_argument("-r", "--rec", type=str,
                         help="uniform recombination rate OR path to tab-separated recombination map file", required=True)
-    parser.add_argument("-g", type=int, help="boolean (0 = use sample reads| 1 = use genotypes)", default=0)
-    parser.add_argument("-m", type=int, help="minimum distance between successive snps (int,bp)", default=1000)
+    parser.add_argument("-g", type=int,
+                        help="boolean (0 = use sample reads| 1 = use genotypes)", default=0)
+    parser.add_argument("-m", type=int,
+                        help="minimum distance between successive snps (int,bp)", default=1000)
     parser.add_argument("-o",  "--out", type=str,
                         help="ploidy file for ahmm input", default="ahmm.ploidy")
-    parser.add_argument("--min_total", type=int, help="minimum number of reference population samples (int)", default=10)
-    parser.add_argument("--min_diff",type=float, help="minimum allele frequency difference between a pair of populations (float)", default=0.1)
+    parser.add_argument("--min_total", type=int,
+                        help="minimum number of reference population samples (int)", default=10)
+    parser.add_argument("--min_diff",type=float,
+                        help="minimum allele frequency difference between a pair of populations (float)", default=0.1)
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = get_args()
-    ### get sample to population mappings
-    sample2pop = {}
+    # Get sample-to-population mappings
+    sample_map = {}
+    panel_pops = set()
+    ordered_samples = []
     with open(args.samples) as file:
         for line in file:
             (key, val) = line.split()
-            sample2pop[key] = val
+            sample_map[key] = val
+            panel_pops.add(val)
+            if val == "admixed":
+                ordered_samples.append(key)
+    # Sort panel population indices
+    panel_pops = sorted([p for p in panel_pops if p != "admixed"])
 
     ### IDs
     sample_fields = []
@@ -101,7 +113,9 @@ if __name__ == "__main__":
             if (line[0].startswith('#CHROM')):
 
                 ### get our info
-                sample_files = line
+                header = line
+                admixed_idx = [header.index(sample) for sample in
+                               ordered_samples if sample_map[sample] == "admixed"]
                 continue
 
             ### skip lines that start with ##
@@ -125,26 +139,30 @@ if __name__ == "__main__":
             ### otherwise get population allele frequencies
             alts = {}
             totals = {}
-            for s in range(9, len(line)):
-                if (sample_files[s] in sample2pop):
-                    if (sample2pop[sample_files[s]] not in totals):
-                        totals[sample2pop[sample_files[s]]] = 0
-                        alts[sample2pop[sample_files[s]]] = 0
-                    if (line[s].startswith('0/0')):
-                        totals[sample2pop[sample_files[s]]] += 2
-                    elif (line[s].startswith('0/1')):
-                        alts[sample2pop[sample_files[s]]] += 1
-                        totals[sample2pop[sample_files[s]]] += 2
-                    elif (line[s].startswith('1/1')):
-                        alts[sample2pop[sample_files[s]]] += 2
-                        totals[sample2pop[sample_files[s]]] += 2
+            for i in range(9, len(line)):
+                if (sample_idx[i] in sample_map):
+                    if sample_map[sample_idx[i]] not in totals:
+                        totals[sample_map[sample_idx[i]]] = 0
+                        alts[sample_map[sample_idx[i]]] = 0
+                    # Assume the genotype is the first three sample chars
+                    genotype = line[i][:3]
+                    if "|" in genotype:
+                        genotype.replace("|", "/")
+                    if genotype == "0/0":
+                        totals[sample_map[sample_idx[i]]] += 2
+                    elif genotype == "0/1":
+                        alts[sample_map[sample_idx[i]]] += 1
+                        totals[sample_map[sample_idx[i]]] += 2
+                    elif genotype == "1/1":
+                        alts[sample_map[sample_idx[i]]] += 2
+                        totals[sample_map[sample_idx[i]]] += 2
 
                     ### read haploid genotypes as needed
-                    elif (line[s].startswith('1')):
-                        alts[sample2pop[sample_files[s]]] += 1
-                        totals[sample2pop[sample_files[s]]] += 1
-                    elif (line[2].startswith('0')):
-                        totals[sample2pop[sample_files[s]]] += 1
+                    elif genotype.startswith('1'):
+                        alts[sample_map[sample_idx[s]]] += 1
+                        totals[sample_map[sample_idx[s]]] += 1
+                    elif genotype.startswith('0'):
+                        totals[sample_map[sample_idx[s]]] += 1
 
             ### make sure we have enough samples at this position
             too_few = 0
@@ -166,9 +184,10 @@ if __name__ == "__main__":
             if (diff == 0):
                 continue
 
-            ### if we got this far, we're rpinting the site
+            ### if we got this far, we're printing the site
             print(line[0], line[1], end="\t", sep="\t")
-            for population, total in totals.items():
+            for population in panel_pops:
+                total = totals[population]
                 if (population != "admixed"):
                     ref = total - alts[population]
                     print (ref, alts[population], end="\t", sep="\t")
@@ -182,39 +201,38 @@ if __name__ == "__main__":
                 rec = map_coord - last_map_coord
             print (rec, end="")
 
-            ### now print the read counts for each admixed sample
-            for s in range(9, len(line)):
-
-                ### only admixed samples
-                if (sample_files[s] in sample2pop and sample2pop[sample_files[s]] == "admixed"):
-
-                    ### print genotypes
-                    if (args.g == 1):
-                        if (line[s].startswith('0/0')):
-                            print("\t", 2, "\t", 0, end="", sep="")
-                        elif (line[s].startswith('0/1')):
-                            print("\t", 1, "\t", 1, end="", sep="")
-                        elif (line[s].startswith('1/1')):
-                            print("\t", 0, "\t", 2, end="", sep="")
-                        elif (line[s].startswith('0')):
-                            print("\t", 1, "\t", 0, end="", sep="")
-                        elif (line[s].startswith('1')):
-                            print("\t", 0, "\t", 1, end="", sep="")
-                        else:
-                            print("\t", 0, "\t", 0, end="", sep="")
-                        if (ploidy_print == 0):
-                            print(sample_files[s], 2, sep="\t", file=open(args.out, "a"))
-
-                    ### print read counts
+            # Now print the read counts for each admixed sample ...
+            for idx in admixed_idx:
+                # From genotypes
+                if (args.g == 1):
+                    genotype = line[idx][:3]
+                    if "|" in genotype:
+                        genotype = genotype.replace("|", "/")
+                    if genotype == "0/0":
+                        print("\t", 2, "\t", 0, end="", sep="")
+                    elif genotype == "0/1":
+                        print("\t", 1, "\t", 1, end="", sep="")
+                    elif genotype == "1/1":
+                        print("\t", 0, "\t", 2, end="", sep="")
+                    elif genotype.startswith('0'):
+                        print("\t", 1, "\t", 0, end="", sep="")
+                    elif genotype.startswith('1'):
+                        print("\t", 0, "\t", 1, end="", sep="")
                     else:
-                        fields = line[s].split(sep=":")
-                        if (len(fields) > 2):
-                            ad = fields[1].split(sep=",")
-                            print ("\t", ad[0], "\t", ad[1], end="", sep="")
-                        else:
-                            print ("\t", 0, "\t", 0,  end="", sep="")
-                        if (ploidy_print == 0):
-                            print(sample_files[s], 2, sep="\t", file=open(args.out, "a"))
+                        print("\t", 0, "\t", 0, end="", sep="")
+                    if (ploidy_print == 0):
+                        print(sample_idx[s], 2, sep="\t", file=open(args.out, "a"))
+
+                # From read counts
+                else:
+                    fields = line[idx].split(sep=":")
+                    if (len(fields) > 2):
+                        ad = fields[1].split(sep=",")
+                        print ("\t", ad[0], "\t", ad[1], end="", sep="")
+                    else:
+                        print ("\t", 0, "\t", 0,  end="", sep="")
+                    if (ploidy_print == 0):
+                        print(sample_idx[s], 2, sep="\t", file=open(args.out, "a"))
 
             ## newline
             print()

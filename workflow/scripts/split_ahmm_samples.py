@@ -43,16 +43,13 @@ if __name__ == "__main__":
                 samples.append(line[0])
 
     for i, sample in enumerate(samples):
-        output_file = f"{args.output}.{sample}.tsv"
+        output_file = f"{args.output}_{sample}.tsv"
         idx = list(range(7)) + [2 * i + 7, 2 * i + 8]
         with open(output_file, "w") as fout:
             for line in contents:
                 line_out = "\t".join([line[j] for j in idx]) + "\n"
                 fout.write(line_out)
-        sample_file = f"{args.output}.{sample}.sample"
+        sample_file = f"{args.output}_{sample}.samples"
         with open(sample_file, "w") as fout:
-            fout.write(f"{sample}\t2")
-
-
-
+            fout.write(f"{sample}\t2\n")
 
