@@ -74,15 +74,7 @@ if __name__ == "__main__":
     with open(args.output, "w") as fout:
         header = "chrom\tposition\t" + "\t".join(samples) + "\n"
         fout.write(header)
-        for chrom_pos, _calls in calls.items():
-            chrom, pos = chrom_pos
-            line = f"{chrom}\t{pos}\t"+"\t".join([str(x) for x in _calls])+"\n"
+        for (chrom, pos), _calls in calls.items():
+            line = "\t".join([chrom, pos] + [str(x) for x in _calls]) + "\n"
             fout.write(line)
-
-
-
-
-
-
-
 

@@ -2,6 +2,11 @@ workflow/.snakemake/
 .ipynb_checkpoints/
 data/vcfs/
 results/vcfs/
+results/AHMM_inputs/*.tsv
+results/AHMM_inputs/split/*.tsv
+results/AHMM_inputs/split/*.samples
+results/AHMM_outputs/*.posterior
+results/ancestry/*.tsv
 tests/
 
 workflow/attempt
