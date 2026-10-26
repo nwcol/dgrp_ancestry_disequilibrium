@@ -24,7 +24,9 @@ with open("../results/DGRP_samples.txt", "r") as fin:
 
 rule all:
     input:
-        "../results/ancestry/DGRP-3_ancestry.tsv",
+        #"../results/ancestry/DGRP-3_ancestry.tsv",
+        "../results/ancestry/allele_diff_0/DGRP-3_ancestry_allele_diff_0_c.tsv",
+        "../results/ancestry/allele_diff_0.1/DGRP-3_ancestry_allele_diff_0.1_c.tsv",
         #expand("../results/site_info/merged_{chrom}.tsv", chrom=CHROMS)
 
 
@@ -221,6 +223,7 @@ rule make_ahmm_inputs:
             --rec {input.rec} \
             -g 1 \
             -m 1000 \
+            --min-diff 0 \
             > {output.table}
         """
 
@@ -237,6 +240,7 @@ rule concatenate_ahmm_inputs:
         cat {input} > {output}
         """
 
+
 rule split_ahmm_inputs:
     # Split AHMM input files so that each DGRP sample has its own file
     # (to reduce the speed of AHMM runs and allow parallelization)
@@ -245,18 +249,18 @@ rule split_ahmm_inputs:
         table="../results/AHMM_inputs/FR_ZI_DGRP_all.tsv",
         samples="../results/VCF_to_AHMM.samples"
     output:
-        table="../results/AHMM_inputs/split/{sample}.tsv",
-        samples="../results/AHMM_inputs/split/{sample}.samples"
+        tables=expand("../results/AHMM_inputs/split/{sample}.tsv",
+                      sample=SAMPLES),
+        samples=expand("../results/AHMM_inputs/split/{sample}.samples",
+                       sample=SAMPLES)
     params:
-        sample="{sample}"
+        prefix="../results/AHMM_inputs/split/"
     shell:
         """
         python {input.script} \
             -i {input.table} \
             -s {input.samples} \
-            --sample {params.sample} \
-            -o {output.samples} \
-            > {output.table}
+            -o {params.prefix}
         """
 
 
@@ -296,7 +300,7 @@ rule buld_ancestry_table:
         script="scripts/merge_ahmm_outputs.py",
         tables=expand("../results/AHMM_outputs/{sample}.posterior",
                       sample=SAMPLES),
-        samples="../results/VCF_to_AHMM.samples"
+        samples="../results/VCF_to_AHMM.samples",
     output:
         "../results/ancestry/DGRP-3_ancestry.tsv"
     shell:
@@ -306,4 +310,22 @@ rule buld_ancestry_table:
             -s {input.samples} \
             -o {output}
         """
+
+rule add_ancestry_recomb_rate_column:
+    input:
+        ancestry="../results/ancestry/DGRP-3_ancestry.tsv",
+        split_input=f"../results/AHMM_inputs/split/{SAMPLES[0]}.tsv"
+    output:
+        table="../results/ancestry/DGRP-3_ancestry_c.tsv"
+    run:
+        df = pandas.read_csv(input.split_input, sep="\t", names=range(9))
+        c = df[6]  # recombination rate
+        df = pandas.read_csv(input.ancestry, sep="\t")
+        df["c"] = c
+        cols = list(df.columns)
+        cols.pop(-1)
+        cols.insert(2, "c")
+        df = df[cols]
+        df.to_csv(output.table, sep="\t", index=False)
+
 

@@ -70,13 +70,13 @@ def get_args():
         help="Ploidy file for ahmm input"
     )
     parser.add_argument(
-        "--min_samples",
+        "--min-samples",
         type=int,
         default=1,
         help="Minimum number of reference population samples (int)"
     )
     parser.add_argument(
-        "--min_diff",
+        "--min-diff",
         type=float,
         default=0.0,
         help="minimum allele frequency difference between populations (float)"

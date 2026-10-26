@@ -1,3 +1,3 @@
-### Mosaic ancestry in the Drosophila Genome Reference Panel (DGRP-3)
+### Mosaic ancestry in the Drosophila Genetic Reference Panel (DGRP-3)
 
 
