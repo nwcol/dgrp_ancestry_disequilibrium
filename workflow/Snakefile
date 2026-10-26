@@ -24,9 +24,8 @@ with open("../results/DGRP_samples.txt", "r") as fin:
 
 rule all:
     input:
-        #"../results/ancestry/DGRP-3_ancestry.tsv",
-        "../results/ancestry/allele_diff_0/DGRP-3_ancestry_allele_diff_0_c.tsv",
-        "../results/ancestry/allele_diff_0.1/DGRP-3_ancestry_allele_diff_0.1_c.tsv",
+        #"../results/ancestry/DGRP_ancestry.tsv",
+        "../results/ancestry/DGRP_ancestry_c.tsv",
         #expand("../results/site_info/merged_{chrom}.tsv", chrom=CHROMS)
 
 
@@ -223,7 +222,7 @@ rule make_ahmm_inputs:
             --rec {input.rec} \
             -g 1 \
             -m 1000 \
-            --min-diff 0 \
+            --min-diff 0.1 \
             > {output.table}
         """
 
@@ -302,7 +301,7 @@ rule buld_ancestry_table:
                       sample=SAMPLES),
         samples="../results/VCF_to_AHMM.samples",
     output:
-        "../results/ancestry/DGRP-3_ancestry.tsv"
+        "../results/ancestry/DGRP_ancestry.tsv"
     shell:
         """
         python {input.script} \
@@ -313,10 +312,10 @@ rule buld_ancestry_table:
 
 rule add_ancestry_recomb_rate_column:
     input:
-        ancestry="../results/ancestry/DGRP-3_ancestry.tsv",
+        ancestry="../results/ancestry/DGRP_ancestry.tsv",
         split_input=f"../results/AHMM_inputs/split/{SAMPLES[0]}.tsv"
     output:
-        table="../results/ancestry/DGRP-3_ancestry_c.tsv"
+        table="../results/ancestry/DGRP_ancestry_c.tsv"
     run:
         df = pandas.read_csv(input.split_input, sep="\t", names=range(9))
         c = df[6]  # recombination rate
