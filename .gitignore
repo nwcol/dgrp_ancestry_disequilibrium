@@ -7,5 +7,4 @@ results/AHMM_inputs/split/*.tsv
 results/AHMM_inputs/split/*.samples
 results/AHMM_outputs/*.posterior
 results/ancestry/*.tsv
-tests/
 
