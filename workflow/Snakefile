@@ -235,8 +235,8 @@ rule make_ahmm_inputs:
             --samples {input.samples} \
             --rec {input.rec} \
             -g 1 \
-            -m 1000 \
-            --min-diff 0.1 \
+            -m 1 \
+            --min-diff 0 \
             > {output.table}
         """
 
@@ -357,7 +357,7 @@ rule compute_fet_pvals:
             -i {input.anc_table} \
             --arm1 {wildcards.arm1} \
             --arm2 {wildcards.arm2} \
-            --threshold 1e-3 \
+            --threshold 1e-5 \
             -b {output.bins_table} \
             -s {output.site_table}
         """
