@@ -1,3 +1,4 @@
+# Ancestry inference with Ancestry HMM and ancestry association analysis
 
 import pandas
 import numpy as np
@@ -13,7 +14,7 @@ def get_chrom_code(wildcards):
     return mapping[wildcards.chrom]
 
 
-# Constants
+# Constants. It would be better for ``CHROMS`` to be called ``ARMS``.
 
 CHROMS = ["2L", "2R", "3L", "3R", "X"]
 SAMPLES = []
@@ -21,26 +22,12 @@ with open("../results/DGRP_samples.txt", "r") as fin:
     for line in fin:
         SAMPLES.append(line.strip())
 
-# Interactions
-ARM_PAIRS = [
-    "X_2L",
-    "X_2R",
-    "X_3L",
-    "X_3R",
-    "2L_2R",
-    "2L_3L",
-    "2L_3R",
-    "2R_3L",
-    "2R_3R",
-    "3L_3R"
-]
+
+# End-product files produced by the pipeline
 
 rule all:
     input:
-        #"../results/ancestry/DGRP_ancestry.tsv",
         "../results/ancestry/DGRP_ancestry_c.tsv",
-        expand("../results/FET_pvals/{arms}_FET_binned_pvals.tsv", arms=ARM_PAIRS),
-        expand("../results/FET_pvals/{arms}_FET_site_pvals.tsv", arms=ARM_PAIRS),
 
 
 # Create some input data
@@ -57,7 +44,9 @@ rule index_input_vcfs:
         """
 
 rule rebuild_rec_map:
-    # Make some alterations to the input recombination map
+    # Make some alterations to the input recombination map. Most significantly,
+    # extend the map to chromosome arm starts/ends with rate 0.01 cM/Mb and
+    # rename arms from numeric codes to strings, e.g. 7 -> 2R.
     input:
         script="scripts/rebuild_recomb.py",
         rec_map="../data/recomb_r6_num.tsv",
@@ -78,6 +67,7 @@ rule rebuild_rec_map:
 # Extract sample labels from VCFs
 
 rule extract_dgrp_sample_names:
+    # Extract sample names from the DGRP VCF file.
     input:
         "../data/vcfs/DGRP-3_final_biallelic-new.vcf.gz"
     output:
@@ -99,7 +89,7 @@ rule extract_panel_sample_names:
         """
 
 rule make_ahmm_to_vcf_sample_file:
-    # Create a file with this format:
+    # Create a sample file for preparing Ancestry HMM input, with this format:
     #   sample_FR_0 0
     #   sample_FR_1 0
     #   sample_ZI_0 1
@@ -133,8 +123,13 @@ rule make_ahmm_sample_file:
 
 rule split_raw_dgrp_vcf:
     # Simplify the DGRP-3 VCF and split it by chromosome.
-    # Bcftools options:
-    #   -v snps: Include only SNPs (raw file includes indels)
+    # bcftools view arguments:
+    #   -r : Subset to arm {wilcards.chrom}.
+    #   -v snps : Subset to SNPs (the input file includes indels).
+    # bcftools annotate arguments:
+    #   -x INFO,^FORMAT/GT,FORMAT/AD,FORMAT/GQ : Drop all INFO fields and all
+    #       FORMAT fields except GT:AD:GQ.
+    #   -W : Index the output file.
     input:
         "../data/vcfs/DGRP-3_final_biallelic-new.vcf.gz",
         index="../data/vcfs/DGRP-3_final_biallelic-new.vcf.gz.csi"
@@ -149,6 +144,14 @@ rule split_raw_dgrp_vcf:
 rule split_raw_panel_vcf:
     # Subset, split by chromosome, and simplify the ZI, ET, FR panel VCF.
     # Map chromosome labels from numeric codes to strings, e.g. 7 -> 2R.
+    # bcftools view arguments:
+    #   -S : Subset samples to samples in {input.samples}
+    #   -r : Subset sites to {wildcards.chrom_code}
+    # bcftools annotate arguments:
+    #   --rename-chrs : Maps chromosome names as described above.
+    #   -x INFO,^FORMAT/GT,FORMAT/AD,FORMAT/GQ : Drop all INFO fields and all
+    #       FORMAT fields except GT:AD:GQ.
+    #   -W : Index the output file.
     input:
         vcf="../data/vcfs/ZI_ET_FR_combined_all_num_biallelic.vcf.gz",
         index="../data/vcfs/ZI_ET_FR_combined_all_num_biallelic.vcf.gz.csi",
@@ -202,9 +205,12 @@ rule merge_site_data:
 rule merge_vcfs:
     # Merge DGRP and panel VCFs and drop sites that aren't biallelic SNPs
     # Bcftools flags:
-    #   -m2 -M2: Keeps only biallelic sites
-    #   -g ^miss: Keep only lines with no missing genotypes
-    #   -W: Create an index file for the output VCF
+    #   -m2 -M2 : Keep only biallelic sites
+    #   -g ^miss : Keep only sites with no missing genotypes. Because there is
+    #       no missingness in the DGRP-3 or panel VCF files, missing sites in
+    #       the merged file should be sites where the minor allele is private
+    #       to the DGRP or panels; such sites are not useful to us.
+    #   -W : Create an index file for the output VCF
     input:
         dgrp="../results/vcfs/DGRP_{chrom}.vcf.gz",
         fr_zi="../results/vcfs/FR_ZI_{chrom}.vcf.gz"
@@ -220,7 +226,13 @@ rule merge_vcfs:
 # Create AncestryHMM input files
 
 rule make_ahmm_inputs:
-    # 
+    # Create a file formatted as input to Ancestry HMM for the entire DGRP
+    # dataset, with FR and ZI panels as ancestral proxies.
+    # Arguments:
+    #   -g 1 : Use genotype information instead of read counts.
+    #   -m 1 : Minimum spacing between SNPs (e.g., use all SNPs).
+    #   --min-diff 0 : Minimum allele frequency difference between panel
+    #       populations (e.g., use all SNPs).
     input:
         script="scripts/vcf_to_ahmm.py",
         vcf="../results/vcfs/merged_FR_ZI_DGRP_{chrom}.vcf.gz",
@@ -256,7 +268,7 @@ rule concatenate_ahmm_inputs:
 
 rule split_ahmm_inputs:
     # Split AHMM input files so that each DGRP sample has its own file
-    # (to reduce the speed of AHMM runs and allow parallelization)
+    # (to reduce the speed of AHMM runs and allow parallelization).
     input:
         script="scripts/split_ahmm_input.py",
         table="../results/AHMM_inputs/FR_ZI_DGRP_all.tsv",
@@ -282,9 +294,14 @@ rule split_ahmm_inputs:
 rule run_ancestry_hmm:
     # Run Ancestry HMM on sample-specific input files.
     # Ancestry HMM arguments:
-    #   -a 2 0.8 0.2: Specify two ancestral populations (FR and ZI), with
-    #                 prior ancestry probabilities 80%, 20%
-    #   etc
+    #   -a 2 0.8 0.2 : Specify two ancestral populations (FR and ZI), with
+    #       prior ancestry probabilities 80%, 20%
+    #   -p 0 0.8 1598 : Ancestry 0 (FR) contributed 80% of ancestry 1598
+    #       generations ago (parameters from Pool, 2015).
+    #   -p 0 0.2 1598 : Ancestry 1 (ZI) contributed 20% of ancestry 1598
+    #       generations ago
+    #   -ne 2500000 : Effective population size of the admixed population.
+    #   -g : Use genotype information rather than read counts.
     input:
         table="../results/AHMM_inputs/split/{sample}.tsv",
         samples="../results/AHMM_inputs/split/{sample}.samples"
@@ -309,6 +326,8 @@ rule run_ancestry_hmm:
 # Build tables with maximum a posterior ancestries for each sample
 
 rule buld_ancestry_table:
+    # Call ancestries using maximum a posteriori (MAP) ancestry probability
+    # and merge samples into one large ancestry table.
     input:
         script="scripts/merge_ahmm_outputs.py",
         tables=expand("../results/AHMM_outputs/{sample}.posterior",
@@ -325,6 +344,8 @@ rule buld_ancestry_table:
         """
 
 rule add_ancestry_recomb_rate_column:
+    # Add a column with the recombination rate at each SNP to the ancestry
+    # table.
     input:
         ancestry="../results/ancestry/DGRP_ancestry.tsv",
         split_input=f"../results/AHMM_inputs/split/{SAMPLES[0]}.tsv"
