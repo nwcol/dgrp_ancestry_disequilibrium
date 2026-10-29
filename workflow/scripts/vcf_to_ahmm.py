@@ -88,7 +88,9 @@ def load_rec_map(filename, chrom):
     """
     Load a recombination map interpolation function.
     """
+    chrom = str(chrom)
     df = pandas.read_csv(filename, sep="\\s+")
+    df["Chrom"] = [str(x) for x in df["Chrom"]]
     # Subset to `chrom` and extract interval endpoints
     sub_df = df[df["Chrom"] == chrom]
     map_xs = [1]
@@ -98,7 +100,7 @@ def load_rec_map(filename, chrom):
         stop = row["Stop"]
         # Convert to M/bp
         rate = row["cM/Mb"] * 1e-8
-        map_span = (stop - start + 1) * rate
+        map_span = (stop - start) * rate
         map_y = map_ys[-1] + map_span
         map_xs.append(stop)
         map_ys.append(map_y)
@@ -180,7 +182,7 @@ if __name__ == "__main__":
                     genotype = line[idx][:3]
                     # Replace phased GT symbol
                     if "|" in genotype:
-                        genotype = genotype.replace("|", "/")
+                        genotype = "/".join(sorted(genotype.split("|")))
                     if genotype == "0/0":
                         tots[pop] += 2
                     elif genotype == "0/1" or genotype == "1/0":
@@ -239,7 +241,7 @@ if __name__ == "__main__":
                     genotype = line[idx][:3]
                     # Replace phased GT symbol
                     if "|" in genotype:
-                        genotype = genotype.replace("|", "/")
+                        genotype = "/".join(sorted(genotype.split("|")))
                     if genotype == "0/0":
                         print("\t", 2, "\t", 0, end="", sep="")
                     elif genotype == "0/1":

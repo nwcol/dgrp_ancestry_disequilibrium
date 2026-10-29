@@ -30,9 +30,10 @@ if __name__ == "__main__":
     # Read sample files
     samples = []
     with open(args.samples, "r") as fin:
-        for line in csv.reader(fin, delimiter="\t"):
-            if line[1] == "admixed":
-                samples.append(line[0])
+        for line in fin:
+            elems = line.strip().split()
+            if elems[1] == "admixed":
+                samples.append(elems[0])
 
     indices = dict()
     outputs = dict()
