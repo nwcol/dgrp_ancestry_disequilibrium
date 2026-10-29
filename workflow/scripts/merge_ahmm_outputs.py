@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
     # Codes for two ancestries. I use `codes[np.argmax(probs)]`, where `probs`
     # are site posterior probabilities, to retrieve ancestry codes.
-    codes = [0, 0.5, 1]
+    codes = [0, -1, 1]
     # Load input files
     calls = dict()
     for input_file in args.input:

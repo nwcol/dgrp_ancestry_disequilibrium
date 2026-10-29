@@ -9,6 +9,3 @@ results/AHMM_outputs/*.posterior
 results/ancestry/*.tsv
 tests/
 
-workflow/attempt
-workflow/temp.vcf
-workflow/x.txt
